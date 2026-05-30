@@ -88,20 +88,24 @@ tg-reminder-bot/
    ```bash
    git clone https://github.com/yourusername/tg-reminder-bot.git
    cd tg-reminder-bot
-
+   ```
 
  2. Заполнить переменные окружения
 
-cp .env.example .env
+   ```bash
+   cp .env.example .env
+   ```
 
-
-BOT_TOKEN=your_telegram_bot_token
-ALLOWED_CHAT_ID=123456789
-NOTIFY_CHAT_ID=987654321
-DATABASE_URL=postgres://postgres:postgres@postgres:5432/reminders?sslmode=disable
-TIMEZONE=Europe/Moscow
-
+   ```bash
+   BOT_TOKEN=your_telegram_bot_token
+   ALLOWED_CHAT_ID=123456789
+   NOTIFY_CHAT_ID=987654321
+   DATABASE_URL=postgres://postgres:postgres@postgres:5432/reminders?sslmode=disable
+   TIMEZONE=Europe/Moscow
+   ```
 
  2. Запустить
 
-docker-compose up --build
+   ```bash
+   docker-compose up --build
+   ```
