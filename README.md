@@ -60,7 +60,7 @@ Storage реализован через интерфейс.
 ## Структура проекта
 
 
-
+```
 tg-reminder-bot/
 ├── cmd/bot/          # точка входа
 ├── internal/
@@ -72,7 +72,7 @@ tg-reminder-bot/
 │   └── models/       # структуры данных
 ├── migrations/       # SQL-миграции
 └── config/           # конфигурация через env
-
+```
 
 ## Запуск
 
