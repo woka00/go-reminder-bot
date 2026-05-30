@@ -26,6 +26,7 @@ services:
       NOTIFY_CHAT_ID: ${NOTIFY_CHAT_ID}
       DATABASE_URL: ${DATABASE_URL}
       TIMEZONE: ${TIMEZONE}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-}
 
 volumes:
   pgdata:

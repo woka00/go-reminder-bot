@@ -1,0 +1,6 @@
+name = "reminder-bot-tg-proxy"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# BOT_TOKEN ставится через секрет, чтобы не лежал в git:
+#   wrangler secret put BOT_TOKEN

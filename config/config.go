@@ -4,16 +4,18 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Config struct {
-	BotToken      string
-	AllowedChatID int64
-	NotifyChatID  int64
-	DatabaseURL   string
-	Timezone      string
-	Location      *time.Location
+	BotToken           string
+	AllowedChatID      int64
+	NotifyChatID       int64
+	DatabaseURL        string
+	Timezone           string
+	Location           *time.Location
+	TelegramAPIBaseURL string
 }
 
 func Load() (*Config, error) {
@@ -59,6 +61,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid TIMEZONE %q: %w", cfg.Timezone, err)
 	}
 	cfg.Location = loc
+
+	if base := strings.TrimRight(os.Getenv("TELEGRAM_API_BASE_URL"), "/"); base != "" {
+		cfg.TelegramAPIBaseURL = base
+	}
 
 	return cfg, nil
 }
