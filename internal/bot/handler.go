@@ -18,14 +18,15 @@ import (
 const unknownInputMessage = "Не распознал задачу. Формат: «завтра в 14:00 сделать дз» или «13 мая закончить доклад»."
 
 type Handler struct {
-	bot     *tgbotapi.BotAPI
-	service service.ReminderService
-	loc     *time.Location
-	log     *slog.Logger
+	bot          *tgbotapi.BotAPI
+	service      service.ReminderService
+	storageChatID int64
+	loc          *time.Location
+	log          *slog.Logger
 }
 
-func NewHandler(bot *tgbotapi.BotAPI, svc service.ReminderService, loc *time.Location, log *slog.Logger) *Handler {
-	return &Handler{bot: bot, service: svc, loc: loc, log: log}
+func NewHandler(bot *tgbotapi.BotAPI, svc service.ReminderService, storageChatID int64, loc *time.Location, log *slog.Logger) *Handler {
+	return &Handler{bot: bot, service: svc, storageChatID: storageChatID, loc: loc, log: log}
 }
 
 func (h *Handler) Handle(ctx context.Context, update tgbotapi.Update) {
@@ -36,20 +37,20 @@ func (h *Handler) Handle(ctx context.Context, update tgbotapi.Update) {
 	if text == "" {
 		return
 	}
-	chatID := update.Message.Chat.ID
+	replyChatID := update.Message.Chat.ID
 
 	cmd, args := splitCommand(text)
 	switch {
 	case cmd == "/list":
-		h.handleList(ctx, chatID)
+		h.handleList(ctx, replyChatID)
 	case cmd == "/history":
-		h.handleHistory(ctx, chatID)
+		h.handleHistory(ctx, replyChatID)
 	case cmd == "/cancel":
-		h.handleCancel(ctx, chatID, args)
+		h.handleCancel(ctx, replyChatID, args)
 	case strings.EqualFold(cmd, "выполнил"):
-		h.handleComplete(ctx, chatID, args)
+		h.handleComplete(ctx, replyChatID, args)
 	default:
-		h.handleCreate(ctx, chatID, text)
+		h.handleCreate(ctx, replyChatID, text)
 	}
 }
 
@@ -66,46 +67,46 @@ func splitCommand(text string) (string, string) {
 	return cmd, args
 }
 
-func (h *Handler) handleCreate(ctx context.Context, chatID int64, text string) {
-	r, err := h.service.CreateFromText(ctx, chatID, text)
+func (h *Handler) handleCreate(ctx context.Context, replyChatID int64, text string) {
+	r, err := h.service.CreateFromText(ctx, h.storageChatID, text)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidInput) {
-			h.reply(chatID, unknownInputMessage)
+			h.reply(replyChatID, unknownInputMessage)
 			return
 		}
 		h.log.Error("create from text", "err", err, "text", text)
-		h.reply(chatID, unknownInputMessage)
+		h.reply(replyChatID, unknownInputMessage)
 		return
 	}
-	h.reply(chatID, formatCreated(r, h.loc))
+	h.reply(replyChatID, formatCreated(r, h.loc))
 }
 
-func (h *Handler) handleList(ctx context.Context, chatID int64) {
-	items, err := h.service.ListActive(ctx, chatID)
+func (h *Handler) handleList(ctx context.Context, replyChatID int64) {
+	items, err := h.service.ListActive(ctx, h.storageChatID)
 	if err != nil {
 		h.log.Error("list active", "err", err)
-		h.reply(chatID, "Не удалось получить список.")
+		h.reply(replyChatID, "Не удалось получить список.")
 		return
 	}
 	if len(items) == 0 {
-		h.reply(chatID, "Активных задач нет.")
+		h.reply(replyChatID, "Активных задач нет.")
 		return
 	}
-	h.reply(chatID, formatActiveList(items, h.loc))
+	h.reply(replyChatID, formatActiveList(items, h.loc))
 }
 
-func (h *Handler) handleHistory(ctx context.Context, chatID int64) {
-	items, err := h.service.ListHistory(ctx, chatID)
+func (h *Handler) handleHistory(ctx context.Context, replyChatID int64) {
+	items, err := h.service.ListHistory(ctx, h.storageChatID)
 	if err != nil {
 		h.log.Error("list history", "err", err)
-		h.reply(chatID, "Не удалось получить историю.")
+		h.reply(replyChatID, "Не удалось получить историю.")
 		return
 	}
 	if len(items) == 0 {
-		h.reply(chatID, "История пуста.")
+		h.reply(replyChatID, "История пуста.")
 		return
 	}
-	h.reply(chatID, formatHistory(items, h.loc))
+	h.reply(replyChatID, formatHistory(items, h.loc))
 }
 
 func (h *Handler) handleCancel(ctx context.Context, chatID int64, args string) {

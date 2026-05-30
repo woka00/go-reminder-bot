@@ -67,8 +67,12 @@ func run(log *slog.Logger) error {
 	sender := bot.NewSender(tgBot, cfg.NotifyChatID)
 	svc := service.New(store, sender, cfg.Location, log)
 
-	handler := bot.NewHandler(tgBot, svc, cfg.Location, log)
-	handle := bot.ChatFilter(cfg.AllowedChatID, log, handler.Handle)
+	handler := bot.NewHandler(tgBot, svc, cfg.NotifyChatID, cfg.Location, log)
+	allowedChats := []int64{cfg.AllowedChatID}
+	if cfg.NotifyChatID != cfg.AllowedChatID {
+		allowedChats = append(allowedChats, cfg.NotifyChatID)
+	}
+	handle := bot.ChatFilter(allowedChats, log, handler.Handle)
 
 	sch := scheduler.New(svc, log)
 
