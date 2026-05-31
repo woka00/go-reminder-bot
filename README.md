@@ -23,8 +23,9 @@
 - Форматы дат: `сегодня`, `завтра`, `послезавтра`, `13 мая`
 - Повторяющиеся напоминания: `каждый день в 08:00 зарядка`, `каждый понедельник в 10:00 стендап`
 - Управление задачами через команды
-- Whitelist по chat_id — бот отвечает только с настроенного аккаунта
+- Whitelist по chat_id — команды принимаются из `ALLOWED_CHAT_ID` и `NOTIFY_CHAT_ID`, общий список задач
 - Опциональный прокси через Cloudflare Worker — для обхода блокировки Telegram из РФ
+- Конкурентная обработка апдейтов и HTTP-таймаут на вызовы Telegram — медленный запрос не блокирует остальные
 - Graceful shutdown, структурированные логи через `slog`
 
 ## Команды
@@ -102,14 +103,17 @@ tg-reminder-bot/
 
    ```env
    BOT_TOKEN=123456:ABC-DEF
-   ALLOWED_CHAT_ID=123456789
-   NOTIFY_CHAT_ID=123456789
+   ALLOWED_CHAT_ID=123456789       # откуда принимаем команды
+   NOTIFY_CHAT_ID=123456789        # куда шлём напоминания и где лежат задачи
    DATABASE_URL=postgres://reminder:reminder@postgres:5432/reminder?sslmode=disable
    TIMEZONE=Europe/Moscow
 
    # Опционально, если api.telegram.org недоступен напрямую:
    # TELEGRAM_API_BASE_URL=https://your-worker.workers.dev
    ```
+
+   Для личного использования `ALLOWED_CHAT_ID` и `NOTIFY_CHAT_ID` — обычно один и тот же chat_id.
+   Разные значения нужны, если, например, команды шлются из личного диалога с ботом, а напоминания — в отдельный канал/группу.
 
 3. Запустить
 
