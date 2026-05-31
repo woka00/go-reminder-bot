@@ -118,14 +118,18 @@ func (s *Service) ProcessDue(ctx context.Context) error {
 			s.log.Error("send reminder", "id", r.ID, "err", err)
 			continue
 		}
-		if err := s.store.MarkDone(ctx, r.ID); err != nil {
-			s.log.Error("mark done after send", "id", r.ID, "err", err)
-			continue
-		}
 		if r.Recurrence != nil {
+			if err := s.store.MarkDone(ctx, r.ID); err != nil {
+				s.log.Error("mark done after send", "id", r.ID, "err", err)
+				continue
+			}
 			if err := s.scheduleNext(ctx, r); err != nil {
 				s.log.Error("schedule next recurrence", "id", r.ID, "err", err)
 			}
+			continue
+		}
+		if err := s.store.MarkNotified(ctx, r.ID); err != nil {
+			s.log.Error("mark notified after send", "id", r.ID, "err", err)
 		}
 	}
 	return nil

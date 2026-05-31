@@ -224,6 +224,9 @@ func formatActiveList(items []*models.Reminder, loc *time.Location) string {
 			b.WriteByte('\n')
 		}
 		fmt.Fprintf(&b, "#%d · %s — %s", r.ID, formatWhen(r, loc), r.Task)
+		if r.NotifiedAt != nil && !r.Done && !r.Cancelled {
+			b.WriteString(" · ждёт подтверждения")
+		}
 	}
 	return b.String()
 }

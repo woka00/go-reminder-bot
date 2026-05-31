@@ -21,6 +21,7 @@ type ReminderStorage interface {
 	ListDue(ctx context.Context, now time.Time) ([]*models.Reminder, error)
 	MarkDone(ctx context.Context, id int64) error
 	MarkCancelled(ctx context.Context, id int64) error
+	MarkNotified(ctx context.Context, id int64) error
 	ListHistory(ctx context.Context, chatID int64, limit int) ([]*models.Reminder, error)
 }
 
@@ -33,7 +34,7 @@ func NewPostgresReminderStorage(pool *pgxpool.Pool) *PostgresReminderStorage {
 }
 
 const reminderColumns = `id, chat_id, task, remind_at, done, done_at, cancelled, cancelled_at,
-    recurrence, recurrence_day, parent_id, created_at`
+    notified_at, recurrence, recurrence_day, parent_id, created_at`
 
 func (s *PostgresReminderStorage) Create(ctx context.Context, r *models.Reminder) (int64, error) {
 	const q = `
@@ -83,7 +84,7 @@ func (s *PostgresReminderStorage) ListActive(ctx context.Context, chatID int64) 
 func (s *PostgresReminderStorage) ListDue(ctx context.Context, now time.Time) ([]*models.Reminder, error) {
 	q := `SELECT ` + reminderColumns + `
         FROM reminders
-        WHERE done = FALSE AND cancelled = FALSE AND remind_at <= $1
+        WHERE done = FALSE AND cancelled = FALSE AND notified_at IS NULL AND remind_at <= $1
         ORDER BY remind_at ASC`
 	rows, err := s.pool.Query(ctx, q, now)
 	if err != nil {
@@ -119,6 +120,19 @@ func (s *PostgresReminderStorage) MarkCancelled(ctx context.Context, id int64) e
 	return nil
 }
 
+func (s *PostgresReminderStorage) MarkNotified(ctx context.Context, id int64) error {
+	const q = `UPDATE reminders SET notified_at = NOW()
+        WHERE id = $1 AND notified_at IS NULL`
+	tag, err := s.pool.Exec(ctx, q, id)
+	if err != nil {
+		return fmt.Errorf("mark notified: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresReminderStorage) ListHistory(ctx context.Context, chatID int64, limit int) ([]*models.Reminder, error) {
 	q := `SELECT ` + reminderColumns + `
         FROM reminders
@@ -142,7 +156,7 @@ func scanReminder(row scanner) (*models.Reminder, error) {
 	err := row.Scan(
 		&r.ID, &r.ChatID, &r.Task, &r.RemindAt,
 		&r.Done, &r.DoneAt, &r.Cancelled, &r.CancelledAt,
-		&r.Recurrence, &r.RecurrenceDay, &r.ParentID, &r.CreatedAt,
+		&r.NotifiedAt, &r.Recurrence, &r.RecurrenceDay, &r.ParentID, &r.CreatedAt,
 	)
 	if err != nil {
 		return nil, err

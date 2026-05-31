@@ -11,6 +11,7 @@ type Reminder struct {
 	DoneAt        *time.Time
 	Cancelled     bool
 	CancelledAt   *time.Time
+	NotifiedAt    *time.Time
 	Recurrence    *string
 	RecurrenceDay *string
 	ParentID      *int64
