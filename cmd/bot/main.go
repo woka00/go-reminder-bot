@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -16,6 +17,11 @@ import (
 	"github.com/wokaxd/reminder-bot/internal/scheduler"
 	"github.com/wokaxd/reminder-bot/internal/service"
 	"github.com/wokaxd/reminder-bot/internal/storage"
+)
+
+const (
+	longPollTimeoutSec = 30
+	httpClientTimeout  = 45 * time.Second
 )
 
 func main() {
@@ -111,30 +117,53 @@ func run(log *slog.Logger) error {
 }
 
 func newTelegramBot(token, baseURL string) (*tgbotapi.BotAPI, error) {
+	var (
+		tgBot *tgbotapi.BotAPI
+		err   error
+	)
 	if baseURL == "" {
-		return tgbotapi.NewBotAPI(token)
+		tgBot, err = tgbotapi.NewBotAPI(token)
+	} else {
+		tgBot, err = tgbotapi.NewBotAPIWithAPIEndpoint(token, baseURL+"/bot%s/%s")
 	}
-	return tgbotapi.NewBotAPIWithAPIEndpoint(token, baseURL+"/bot%s/%s")
+	if err != nil {
+		return nil, err
+	}
+	tgBot.Client = &http.Client{Timeout: httpClientTimeout}
+	return tgBot, nil
 }
 
 func runUpdates(ctx context.Context, tgBot *tgbotapi.BotAPI, handle bot.HandlerFunc, log *slog.Logger) {
 	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 30
+	u.Timeout = longPollTimeoutSec
 	updates := tgBot.GetUpdatesChan(u)
+
+	var handlersWG sync.WaitGroup
 
 	log.Info("update loop started")
 	for {
 		select {
 		case <-ctx.Done():
 			tgBot.StopReceivingUpdates()
+			handlersWG.Wait()
 			log.Info("update loop stopped")
 			return
 		case update, ok := <-updates:
 			if !ok {
+				handlersWG.Wait()
 				log.Info("updates channel closed")
 				return
 			}
-			handle(ctx, update)
+			handlersWG.Add(1)
+			go func(u tgbotapi.Update) {
+				defer handlersWG.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error("handler panic", "recover", r, "update_id", u.UpdateID)
+					}
+				}()
+				handle(ctx, u)
+			}(update)
 		}
 	}
 }
