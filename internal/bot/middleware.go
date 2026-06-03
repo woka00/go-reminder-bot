@@ -15,16 +15,24 @@ func ChatFilter(allowedChatIDs []int64, log *slog.Logger, next HandlerFunc) Hand
 		allowed[id] = struct{}{}
 	}
 	return func(ctx context.Context, update tgbotapi.Update) {
-		if update.Message == nil || update.Message.Chat == nil {
+		chatID := chatIDOf(update)
+		if chatID == 0 {
 			return
 		}
-		if _, ok := allowed[update.Message.Chat.ID]; !ok {
-			log.Warn("ignored message from foreign chat",
-				"chat_id", update.Message.Chat.ID,
-				"user_id", update.Message.From.ID,
-			)
+		if _, ok := allowed[chatID]; !ok {
+			log.Warn("ignored update from foreign chat", "chat_id", chatID)
 			return
 		}
 		next(ctx, update)
 	}
+}
+
+func chatIDOf(u tgbotapi.Update) int64 {
+	if u.Message != nil && u.Message.Chat != nil {
+		return u.Message.Chat.ID
+	}
+	if u.CallbackQuery != nil && u.CallbackQuery.Message != nil && u.CallbackQuery.Message.Chat != nil {
+		return u.CallbackQuery.Message.Chat.ID
+	}
+	return 0
 }

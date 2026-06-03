@@ -23,6 +23,7 @@ type ReminderService interface {
 	CreateFromText(ctx context.Context, chatID int64, text string) (*models.Reminder, error)
 	Complete(ctx context.Context, id int64) error
 	Cancel(ctx context.Context, id int64) error
+	Reschedule(ctx context.Context, id int64, newRemindAt time.Time) error
 	ListActive(ctx context.Context, chatID int64) ([]*models.Reminder, error)
 	ListHistory(ctx context.Context, chatID int64) ([]*models.Reminder, error)
 	ProcessDue(ctx context.Context) error
@@ -88,6 +89,16 @@ func (s *Service) Cancel(ctx context.Context, id int64) error {
 			return ErrNotFound
 		}
 		return fmt.Errorf("mark cancelled: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) Reschedule(ctx context.Context, id int64, newRemindAt time.Time) error {
+	if err := s.store.Reschedule(ctx, id, newRemindAt); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("reschedule: %w", err)
 	}
 	return nil
 }

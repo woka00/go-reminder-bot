@@ -20,6 +20,7 @@ func NewSender(bot *tgbotapi.BotAPI, notifyChatID int64) *TelegramSender {
 
 func (s *TelegramSender) SendReminder(_ context.Context, r *models.Reminder) error {
 	msg := tgbotapi.NewMessage(s.notifyChatID, formatReminderNotification(r))
+	msg.ReplyMarkup = notificationKeyboard(r.ID)
 	if _, err := s.bot.Send(msg); err != nil {
 		return fmt.Errorf("send reminder %d: %w", r.ID, err)
 	}

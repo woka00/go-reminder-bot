@@ -22,6 +22,7 @@ type ReminderStorage interface {
 	MarkDone(ctx context.Context, id int64) error
 	MarkCancelled(ctx context.Context, id int64) error
 	MarkNotified(ctx context.Context, id int64) error
+	Reschedule(ctx context.Context, id int64, newRemindAt time.Time) error
 	ListHistory(ctx context.Context, chatID int64, limit int) ([]*models.Reminder, error)
 }
 
@@ -126,6 +127,19 @@ func (s *PostgresReminderStorage) MarkNotified(ctx context.Context, id int64) er
 	tag, err := s.pool.Exec(ctx, q, id)
 	if err != nil {
 		return fmt.Errorf("mark notified: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresReminderStorage) Reschedule(ctx context.Context, id int64, newRemindAt time.Time) error {
+	const q = `UPDATE reminders SET remind_at = $2, notified_at = NULL
+        WHERE id = $1 AND done = FALSE AND cancelled = FALSE`
+	tag, err := s.pool.Exec(ctx, q, id, newRemindAt)
+	if err != nil {
+		return fmt.Errorf("reschedule: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound

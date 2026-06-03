@@ -30,6 +30,10 @@ func NewHandler(bot *tgbotapi.BotAPI, svc service.ReminderService, storageChatID
 }
 
 func (h *Handler) Handle(ctx context.Context, update tgbotapi.Update) {
+	if update.CallbackQuery != nil {
+		h.handleCallback(ctx, update.CallbackQuery)
+		return
+	}
 	if update.Message == nil {
 		return
 	}
@@ -41,6 +45,8 @@ func (h *Handler) Handle(ctx context.Context, update tgbotapi.Update) {
 
 	cmd, args := splitCommand(text)
 	switch {
+	case cmd == "/start":
+		h.handleStart(replyChatID)
 	case cmd == "/list":
 		h.handleList(ctx, replyChatID)
 	case cmd == "/history":
@@ -51,6 +57,14 @@ func (h *Handler) Handle(ctx context.Context, update tgbotapi.Update) {
 		h.handleComplete(ctx, replyChatID, args)
 	default:
 		h.handleCreate(ctx, replyChatID, text)
+	}
+}
+
+func (h *Handler) handleStart(chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Привет. Пиши задачи естественным языком, например: «завтра в 14:00 позвонить маме».\nКоманды: /list, /history.")
+	msg.ReplyMarkup = persistentKeyboard()
+	if _, err := h.bot.Send(msg); err != nil {
+		h.log.Error("send start", "err", err)
 	}
 }
 
@@ -78,7 +92,11 @@ func (h *Handler) handleCreate(ctx context.Context, replyChatID int64, text stri
 		h.reply(replyChatID, unknownInputMessage)
 		return
 	}
-	h.reply(replyChatID, formatCreated(r, h.loc))
+	msg := tgbotapi.NewMessage(replyChatID, formatCreated(r, h.loc))
+	msg.ReplyMarkup = createdKeyboard(r.ID)
+	if _, err := h.bot.Send(msg); err != nil {
+		h.log.Error("send created", "err", err)
+	}
 }
 
 func (h *Handler) handleList(ctx context.Context, replyChatID int64) {
@@ -92,7 +110,11 @@ func (h *Handler) handleList(ctx context.Context, replyChatID int64) {
 		h.reply(replyChatID, "Активных задач нет.")
 		return
 	}
-	h.reply(replyChatID, formatActiveList(items, h.loc))
+	msg := tgbotapi.NewMessage(replyChatID, formatActiveList(items, h.loc))
+	msg.ReplyMarkup = listInlineKeyboard(items)
+	if _, err := h.bot.Send(msg); err != nil {
+		h.log.Error("send list", "err", err)
+	}
 }
 
 func (h *Handler) handleHistory(ctx context.Context, replyChatID int64) {
@@ -149,6 +171,153 @@ func (h *Handler) reply(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	if _, err := h.bot.Send(msg); err != nil {
 		h.log.Error("send reply", "chat_id", chatID, "err", err)
+	}
+}
+
+func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+	parts := strings.Split(cb.Data, ":")
+	if len(parts) < 2 {
+		h.ackCallback(cb.ID, "")
+		return
+	}
+	action := parts[0]
+	id, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || id <= 0 {
+		h.ackCallback(cb.ID, "")
+		return
+	}
+
+	switch action {
+	case cbDone:
+		h.cbComplete(ctx, cb, id, false)
+	case cbListClose:
+		h.cbComplete(ctx, cb, id, true)
+	case cbCancel:
+		h.cbCancel(ctx, cb, id)
+	case cbSnooze:
+		if len(parts) < 3 {
+			h.ackCallback(cb.ID, "")
+			return
+		}
+		mins, err := strconv.Atoi(parts[2])
+		if err != nil || mins <= 0 {
+			h.ackCallback(cb.ID, "")
+			return
+		}
+		h.cbSnooze(ctx, cb, id, time.Duration(mins)*time.Minute)
+	case cbTomorrow:
+		h.cbTomorrow(ctx, cb, id)
+	case cbReschedule:
+		h.cbSwapMarkup(cb, rescheduleMenuKeyboard(id))
+	case cbBack:
+		h.cbSwapMarkup(cb, notificationKeyboard(id))
+	default:
+		h.ackCallback(cb.ID, "")
+	}
+}
+
+func (h *Handler) ackCallback(cbID, text string) {
+	cfg := tgbotapi.NewCallback(cbID, text)
+	if _, err := h.bot.Request(cfg); err != nil {
+		h.log.Error("ack callback", "err", err)
+	}
+}
+
+func (h *Handler) cbComplete(ctx context.Context, cb *tgbotapi.CallbackQuery, id int64, fromList bool) {
+	if err := h.service.Complete(ctx, id); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			h.ackCallback(cb.ID, fmt.Sprintf("Задача #%d не найдена", id))
+			return
+		}
+		h.log.Error("cb complete", "id", id, "err", err)
+		h.ackCallback(cb.ID, "Ошибка")
+		return
+	}
+	if fromList {
+		h.refreshList(ctx, cb)
+	} else {
+		h.editMessageAppend(cb.Message, "Закрыто.")
+	}
+	h.ackCallback(cb.ID, fmt.Sprintf("Закрыто #%d", id))
+}
+
+func (h *Handler) cbCancel(ctx context.Context, cb *tgbotapi.CallbackQuery, id int64) {
+	if err := h.service.Cancel(ctx, id); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			h.ackCallback(cb.ID, fmt.Sprintf("Задача #%d не найдена", id))
+			return
+		}
+		h.log.Error("cb cancel", "id", id, "err", err)
+		h.ackCallback(cb.ID, "Ошибка")
+		return
+	}
+	h.editMessageAppend(cb.Message, "Отменено.")
+	h.ackCallback(cb.ID, fmt.Sprintf("Отменено #%d", id))
+}
+
+func (h *Handler) cbSnooze(ctx context.Context, cb *tgbotapi.CallbackQuery, id int64, d time.Duration) {
+	newAt := time.Now().In(h.loc).Add(d).Truncate(time.Minute)
+	if err := h.service.Reschedule(ctx, id, newAt); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			h.ackCallback(cb.ID, fmt.Sprintf("Задача #%d не найдена", id))
+			return
+		}
+		h.log.Error("cb snooze", "id", id, "err", err)
+		h.ackCallback(cb.ID, "Ошибка")
+		return
+	}
+	h.editMessageAppend(cb.Message, fmt.Sprintf("Отложено до %s.", formatHM(newAt, h.loc)))
+	h.ackCallback(cb.ID, "Отложено")
+}
+
+func (h *Handler) cbTomorrow(ctx context.Context, cb *tgbotapi.CallbackQuery, id int64) {
+	now := time.Now().In(h.loc)
+	target := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, h.loc).AddDate(0, 0, 1)
+	if err := h.service.Reschedule(ctx, id, target); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			h.ackCallback(cb.ID, fmt.Sprintf("Задача #%d не найдена", id))
+			return
+		}
+		h.log.Error("cb tomorrow", "id", id, "err", err)
+		h.ackCallback(cb.ID, "Ошибка")
+		return
+	}
+	h.editMessageAppend(cb.Message, fmt.Sprintf("Перенесено на %s, %s.", formatDayMonth(target, h.loc), formatHM(target, h.loc)))
+	h.ackCallback(cb.ID, "Перенесено")
+}
+
+func (h *Handler) cbSwapMarkup(cb *tgbotapi.CallbackQuery, kb tgbotapi.InlineKeyboardMarkup) {
+	edit := tgbotapi.NewEditMessageReplyMarkup(cb.Message.Chat.ID, cb.Message.MessageID, kb)
+	if _, err := h.bot.Request(edit); err != nil {
+		h.log.Error("swap markup", "err", err)
+	}
+	h.ackCallback(cb.ID, "")
+}
+
+func (h *Handler) editMessageAppend(msg *tgbotapi.Message, suffix string) {
+	text := strings.TrimRight(msg.Text, " \n") + "\n" + suffix
+	edit := tgbotapi.NewEditMessageTextAndMarkup(msg.Chat.ID, msg.MessageID, text, emptyInlineMarkup)
+	if _, err := h.bot.Send(edit); err != nil {
+		h.log.Error("edit message append", "err", err)
+	}
+}
+
+func (h *Handler) refreshList(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+	items, err := h.service.ListActive(ctx, h.storageChatID)
+	if err != nil {
+		h.log.Error("refresh list", "err", err)
+		return
+	}
+	if len(items) == 0 {
+		edit := tgbotapi.NewEditMessageTextAndMarkup(cb.Message.Chat.ID, cb.Message.MessageID, "Активных задач нет.", emptyInlineMarkup)
+		if _, err := h.bot.Send(edit); err != nil {
+			h.log.Error("edit empty list", "err", err)
+		}
+		return
+	}
+	edit := tgbotapi.NewEditMessageTextAndMarkup(cb.Message.Chat.ID, cb.Message.MessageID, formatActiveList(items, h.loc), listInlineKeyboard(items))
+	if _, err := h.bot.Send(edit); err != nil {
+		h.log.Error("edit list", "err", err)
 	}
 }
 
@@ -254,5 +423,5 @@ func formatHistory(items []*models.Reminder, loc *time.Location) string {
 }
 
 func formatReminderNotification(r *models.Reminder) string {
-	return fmt.Sprintf("Напоминание #%d — %s.\nЕсли выполнено, закрой задачу: выполнил %d", r.ID, r.Task, r.ID)
+	return fmt.Sprintf("Напоминание #%d — %s.", r.ID, r.Task)
 }
