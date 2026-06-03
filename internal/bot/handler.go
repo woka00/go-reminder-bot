@@ -12,8 +12,11 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/wokaxd/reminder-bot/internal/models"
+	"github.com/wokaxd/reminder-bot/internal/parser"
 	"github.com/wokaxd/reminder-bot/internal/service"
 )
+
+const reschedulePromptPrefix = "Новое время для #"
 
 const unknownInputMessage = "Не распознал задачу. Формат: «завтра в 14:00 сделать дз» или «13 мая закончить доклад»."
 
@@ -42,6 +45,11 @@ func (h *Handler) Handle(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 	replyChatID := update.Message.Chat.ID
+
+	if id, ok := h.matchReschedulePrompt(update.Message.ReplyToMessage); ok {
+		h.handleCustomReschedule(ctx, replyChatID, update.Message.ReplyToMessage, id, text)
+		return
+	}
 
 	cmd, args := splitCommand(text)
 	switch {
@@ -207,6 +215,8 @@ func (h *Handler) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery
 		h.cbSnooze(ctx, cb, id, time.Duration(mins)*time.Minute)
 	case cbTomorrow:
 		h.cbTomorrow(ctx, cb, id)
+	case cbCustom:
+		h.cbAskCustom(cb, id)
 	case cbReschedule:
 		h.cbSwapMarkup(cb, rescheduleMenuKeyboard(id))
 	case cbBack:
@@ -299,6 +309,64 @@ func (h *Handler) editMessageAppend(msg *tgbotapi.Message, suffix string) {
 	edit := tgbotapi.NewEditMessageTextAndMarkup(msg.Chat.ID, msg.MessageID, text, emptyInlineMarkup)
 	if _, err := h.bot.Send(edit); err != nil {
 		h.log.Error("edit message append", "err", err)
+	}
+}
+
+func (h *Handler) cbAskCustom(cb *tgbotapi.CallbackQuery, id int64) {
+	prompt := fmt.Sprintf(
+		"%s%d. Напиши новое время, например: «завтра в 14:00», «13 мая в 10:00», «послезавтра в 18:00».",
+		reschedulePromptPrefix, id,
+	)
+	msg := tgbotapi.NewMessage(cb.Message.Chat.ID, prompt)
+	msg.ReplyMarkup = tgbotapi.ForceReply{ForceReply: true, InputFieldPlaceholder: "завтра в 14:00"}
+	if _, err := h.bot.Send(msg); err != nil {
+		h.log.Error("ask custom", "err", err)
+	}
+	h.ackCallback(cb.ID, "")
+}
+
+func (h *Handler) matchReschedulePrompt(reply *tgbotapi.Message) (int64, bool) {
+	if reply == nil || reply.From == nil {
+		return 0, false
+	}
+	if reply.From.ID != h.bot.Self.ID {
+		return 0, false
+	}
+	if !strings.HasPrefix(reply.Text, reschedulePromptPrefix) {
+		return 0, false
+	}
+	rest := reply.Text[len(reschedulePromptPrefix):]
+	end := strings.IndexAny(rest, ". \n")
+	if end < 0 {
+		end = len(rest)
+	}
+	id, err := strconv.ParseInt(rest[:end], 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+func (h *Handler) handleCustomReschedule(ctx context.Context, replyChatID int64, prompt *tgbotapi.Message, id int64, text string) {
+	newAt, err := parser.ParseDateTime(text, time.Now(), h.loc)
+	if err != nil {
+		h.reply(replyChatID, "Не понял время. Формат: «завтра в 14:00» или «13 мая в 10:00».")
+		return
+	}
+	if err := h.service.Reschedule(ctx, id, newAt); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			h.reply(replyChatID, fmt.Sprintf("Задача #%d не найдена.", id))
+			return
+		}
+		h.log.Error("custom reschedule", "id", id, "err", err)
+		h.reply(replyChatID, "Не удалось перенести.")
+		return
+	}
+	confirmation := fmt.Sprintf("#%d — перенесено на %s, %s.", id, formatDayMonth(newAt, h.loc), formatHM(newAt, h.loc))
+	edit := tgbotapi.NewEditMessageText(prompt.Chat.ID, prompt.MessageID, confirmation)
+	if _, err := h.bot.Send(edit); err != nil {
+		h.log.Error("edit reschedule prompt", "err", err)
+		h.reply(replyChatID, confirmation)
 	}
 }
 

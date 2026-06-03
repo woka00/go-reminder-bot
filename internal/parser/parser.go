@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-var ErrEmptyTask = errors.New("empty task")
+var (
+	ErrEmptyTask  = errors.New("empty task")
+	ErrNoDateTime = errors.New("no date or time")
+)
 
 type ParseResult struct {
 	Task          string
@@ -52,6 +55,34 @@ func Parse(input string, now time.Time, loc *time.Location) (*ParseResult, error
 		Recurrence:    rec.Recurrence,
 		RecurrenceDay: rec.RecurrenceDay,
 	}, nil
+}
+
+func ParseDateTime(input string, now time.Time, loc *time.Location) (time.Time, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return time.Time{}, ErrNoDateTime
+	}
+	now = now.In(loc)
+
+	rest, tr, err := extractTime(input)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse time: %w", err)
+	}
+	_, dr, err := extractDate(rest, now)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse date: %w", err)
+	}
+	if !tr.Found && !dr.Found {
+		return time.Time{}, ErrNoDateTime
+	}
+	if dr.Found {
+		return time.Date(dr.Year, dr.Month, dr.Day, tr.Hour, tr.Minute, 0, 0, loc), nil
+	}
+	t := time.Date(now.Year(), now.Month(), now.Day(), tr.Hour, tr.Minute, 0, 0, loc)
+	if !t.After(now) {
+		t = t.AddDate(0, 0, 1)
+	}
+	return t, nil
 }
 
 func buildRemindAt(rec recurrenceResult, dr dateResult, tr timeResult, now time.Time, loc *time.Location) (time.Time, error) {

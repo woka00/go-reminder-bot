@@ -15,6 +15,7 @@ const (
 	cbReschedule = "rsch"
 	cbBack       = "back"
 	cbTomorrow   = "tmrw"
+	cbCustom     = "cstm"
 	cbListClose  = "lc"
 )
 
@@ -43,6 +44,9 @@ func rescheduleMenuKeyboard(id int64) tgbotapi.InlineKeyboardMarkup {
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("Завтра 09:00", fmt.Sprintf("%s:%d", cbTomorrow, id)),
+			tgbotapi.NewInlineKeyboardButtonData("Своё время", fmt.Sprintf("%s:%d", cbCustom, id)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("← Назад", fmt.Sprintf("%s:%d", cbBack, id)),
 		),
 	)
